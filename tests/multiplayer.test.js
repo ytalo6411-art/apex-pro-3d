@@ -977,3 +977,109 @@ test("proteção contra duplicidade: segunda busca simultânea é ignorada e que
     clearTimeout(mp.refreshTimer);
   }
 });
+
+test("anonymous sign-ins disabled falls back to the e-mail login panel", async () => {
+  // GoTrue rejects signInAnonymously() with HTTP 403 when the project has
+  // Anonymous Sign-Ins turned off. The gate must reach the login form instead
+  // of dead-ending on a generic sync-error retry screen.
+  const disabledError = Object.assign(new Error("Anonymous sign-ins are disabled"), {
+    status: 403,
+  });
+  const client = {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      signInAnonymously: async () => ({ data: null, error: disabledError }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+    },
+    rpc: async () => {
+      throw new Error("must not call RPCs without a session");
+    },
+    from: () => {
+      throw new Error("must not query tables without a session");
+    },
+  };
+  const game = {
+    ui: { page: "account", render() {}, toast() {}, modal: null },
+    authStatus: "checking",
+    save: defaults(),
+    multiplayer: null,
+    world: { setMode() {}, setPreview() {}, raceContext: null },
+    applyCloudSave() {},
+  };
+  const mp = new MultiplayerClient(game, { client, configured: true });
+  game.multiplayer = mp;
+
+  const booted = await mp.initializeAccount();
+  assert.equal(booted, false, "no session yet, so the game stays gated");
+  assert.equal(mp.state.anonymousUnavailable, true, "flag records the project state");
+  assert.equal(mp.state.authView, "login", "lands on the e-mail login view");
+  assert.equal(mp.state.connection, "offline", "not a broken connection");
+  assert.equal(mp.state.error, "", "no scary error banner");
+  assert.match(mp.state.info, /e-mail/i);
+  assert.equal(game.authStatus, "login-required", "auth panel is reachable");
+
+  // A different auth failure must still surface as a real error, not silently
+  // downgrade to the login panel.
+  const networkClient = {
+    ...client,
+    auth: {
+      ...client.auth,
+      signInAnonymously: async () => ({
+        data: null,
+        error: Object.assign(new Error("Failed to fetch"), { status: 0 }),
+      }),
+    },
+  };
+  const game2 = { ...game, authStatus: "checking", multiplayer: null };
+  const mp2 = new MultiplayerClient(game2, { client: networkClient, configured: true });
+  game2.multiplayer = mp2;
+  await mp2.initializeAccount();
+  assert.equal(mp2.state.anonymousUnavailable, false);
+  assert.equal(game2.authStatus, "sync-error", "real failures keep the retry path");
+  assert.ok(mp2.state.error, "the failure is visible");
+});
+
+test("auth panel hides the identity card when anonymous sign-ins are off", async () => {
+  const { register } = await import("node:module");
+  register("./css-hooks.mjs", import.meta.url);
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(
+    `<!doctype html><html><body><div id="app"><div id="world"></div><div id="ui"></div><div id="toast"></div></div></body></html>`,
+    { url: "http://localhost:5173/", pretendToBeVisual: true },
+  );
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.localStorage = dom.window.localStorage;
+  globalThis.sessionStorage = dom.window.sessionStorage;
+  globalThis.location = dom.window.location;
+  globalThis.history = dom.window.history;
+
+  const { UI } = await import("../src/ui.js");
+  const state = {
+    configured: true,
+    authView: "identity",
+    anonymousUnavailable: true,
+    busy: false,
+    error: "",
+    info: "",
+    profile: null,
+    room: null,
+    players: [],
+    publicRooms: [],
+    results: [],
+    connection: "offline",
+    cloudSaveStatus: "idle",
+  };
+  const game = {
+    authStatus: "login-required",
+    save: defaults(),
+    multiplayer: { state },
+    world: { container: dom.window.document.getElementById("world"), resize() {} },
+  };
+  const ui = new UI(game);
+  const html = ui.authPanel();
+  assert.ok(html.includes("auth-login-form"), "login form is rendered");
+  assert.ok(!html.includes("identity-form"), "identity card is not offered");
+  assert.ok(!html.includes('data-view="identity"'), "no dead-end link to identity");
+  assert.match(html, /Anonymous Sign-Ins/i, "explains why");
+});
