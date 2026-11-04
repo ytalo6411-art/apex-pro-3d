@@ -2,12 +2,37 @@
 
 ## Projeto provisionado
 
-- Projeto Supabase: `apex-dynasty-3d-pro` (plano Free, região São Paulo `sa-east-1`).
-- Referência: `kjvzbonieahvqobulggb`.
+- Projeto Supabase: `apex-dynasty-3d` (plano Free, região São Paulo `sa-east-1`).
+- Referência: `ztqwdwnauffdsqvgnqpr`.
 - Migrations multiplayer/RLS/saves: `20261028211101` (`apex_dynasty_multiplayer`), `20261028211941` (`revoke_anon_public_table_privileges`), `20261029201652` (`google_account_cloud_saves`, tabela `player_saves`) e `20261104120000` (`email_password_auth`: remove o gate Google, adiciona `profiles.username` único, troca as políticas/RPCs para contas de e-mail confirmadas e cria os RPCs de login por nome de usuário).
 - O jogo só libera qualquer tela de carreira depois de uma sessão autenticada (identidade anônima criada automaticamente no primeiro acesso, ou conta e-mail antiga pelo link secundário) e do carregamento do save. O banco confere `auth.uid()` em RLS e RPCs; a interface não é a única barreira.
 
 `.env.local` é ignorado pelo Git. O frontend usa somente uma **publishable key**. Nunca coloque `service_role` / `sb_secret_*` em variável `VITE_*`, bundle ou repositório. Não existe mais provedor OAuth nem segredo de provedor neste projeto.
+
+## Status da configuração (verificado em 2026-11-04)
+
+| Item | Estado |
+| --- | --- |
+| Banco: `profiles`, `rooms`, `room_players`, `race_results`, `player_saves`, `username_attempts` | ✅ aplicados |
+| RPCs (`set_username`, `username_available`, `email_for_username`, `load_player_save`, `save_player_save`, sala/corrida) | ✅ 45 funções presentes |
+| RLS com gate `is_authenticated_user()` (aceita anônimo **e** e-mail) | ✅ aplicado |
+| Site URL / redirect URLs (`https://apex-pro-3d-amber.vercel.app`, `http://localhost:5173`) | ✅ configurados |
+| Provedor E-mail | ✅ habilitado, `Confirm email` **desligado** (autoconfirm) — criar conta entra direto |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` na Vercel | ✅ configurados, deploy production READY |
+| **Anonymous Sign-Ins** | ❌ **DESLIGADO — único bloqueio que resta** |
+
+`list_migrations` da Management API retorna vazio porque as migrations foram
+aplicadas pelo SQL Editor; o schema foi conferido objeto a objeto no banco.
+
+**Para liberar o fluxo sem cadastro:** [Authentication → Sign In / Providers →
+Anonymous](https://supabase.com/dashboard/project/ztqwdwnauffdsqvgnqpr/auth/providers)
+→ habilite **Enable Anonymous Sign-Ins**. O limite anti-abuso
+(`rate_limit_anonymous_users = 30/h`) já está no valor recomendado.
+
+**Sem esse toggle o jogo continua jogável:** `signInAnonymously()` é rejeitado
+com HTTP 403 e o gate cai no painel de conta de e-mail
+(`state.anonymousUnavailable`), com aviso explicando o motivo. Como o
+autoconfirm está ligado, criar conta entra na hora, sem clicar em e-mail.
 
 ## Configurar a identidade anônima (passos no painel — faça você mesmo)
 
@@ -18,15 +43,15 @@
 
 ## Configurar a autenticação por e-mail e senha (legado)
 
-1. No [Supabase — Authentication Providers](https://supabase.com/dashboard/project/kjvzbonieahvqobulggb/auth/providers), mantenha o provedor **E-mail** habilitado para contas antigas. **Não habilite Google nem nenhum outro provedor OAuth.**
+1. No [Supabase — Authentication Providers](https://supabase.com/dashboard/project/ztqwdwnauffdsqvgnqpr/auth/providers), mantenha o provedor **E-mail** habilitado para contas antigas. **Não habilite Google nem nenhum outro provedor OAuth.**
 2. Em Authentication → Settings, mantenha **Confirm email** ligado: o jogador só acessa o jogo depois de clicar no link enviado por e-mail (a tela exibe a opção de reenviar a confirmação).
 3. Desligue **Anonymous Sign-Ins** em Authentication → Sign In / Providers; o banco rejeita sessões anônimas mesmo que a opção fique ligada.
-4. No [Supabase — URL Configuration](https://supabase.com/dashboard/project/kjvzbonieahvqobulggb/auth/url-configuration), defina o Site URL real e permita os redirect URLs usados pelo jogo (desenvolvimento local e domínio publicado), incluindo a URL usada no link de recuperação de senha.
+4. No [Supabase — URL Configuration](https://supabase.com/dashboard/project/ztqwdwnauffdsqvgnqpr/auth/url-configuration), defina o Site URL real e permita os redirect URLs usados pelo jogo (desenvolvimento local e domínio publicado), incluindo a URL usada no link de recuperação de senha.
 5. Aplique as migrations de `supabase/migrations/` (em ordem). A migration `20261104120000_email_password_auth.sql` adiciona a coluna única `username` em `profiles`, atualiza o gatilho `on_auth_user_create_profile` para gravar o `username` enviado no cadastro e reescreve políticas/RPCs com o gate `require_confirmed_user()`.
 6. Para desenvolvimento local, configure o ambiente Vite e reinicie o servidor:
 
    ```dotenv
-   VITE_SUPABASE_URL=https://kjvzbonieahvqobulggb.supabase.co
+   VITE_SUPABASE_URL=https://ztqwdwnauffdsqvgnqpr.supabase.co
    VITE_SUPABASE_ANON_KEY=<publishable-key>
    ```
 

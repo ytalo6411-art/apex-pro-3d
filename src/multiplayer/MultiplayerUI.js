@@ -41,12 +41,19 @@ export function extendMultiplayerUI(UI) {
     } else {
       content = this.authPanel();
     }
-    return `<main class="account-gate"><div class="account-gate-shell"><div class="account-brand"><img src="/assets/logo-primary.png" alt="Apex Dynasty"><span><b>APEX DYNASTY<span class="brand-dot">.</span></b><small>BUILD THE TEAM. MASTER THE RACE.</small></span></div><section class="account-gate-intro"><div class="eyebrow">UMA CONTA · A MESMA CARREIRA</div><h1>Seu legado acompanha você.</h1><p>Escolha seu nome de piloto e entre direto no jogo. Sua carreira fica salva na nuvem vinculada à sua identidade.</p></section>${content}<p class="account-gate-footnote">Identidade anônima via Supabase Auth. Contas antigas com e-mail continuam acessíveis pela opção secundária.</p></div></main>`;
+    const footnote = state.anonymousUnavailable
+      ? "Conta de e-mail e senha via Supabase Auth. Habilite Anonymous Sign-Ins no painel para liberar a entrada sem cadastro."
+      : "Identidade anônima via Supabase Auth. Contas antigas com e-mail continuam acessíveis pela opção secundária.";
+    return `<main class="account-gate"><div class="account-gate-shell"><div class="account-brand"><img src="/assets/logo-primary.png" alt="Apex Dynasty"><span><b>APEX DYNASTY<span class="brand-dot">.</span></b><small>BUILD THE TEAM. MASTER THE RACE.</small></span></div><section class="account-gate-intro"><div class="eyebrow">UMA CONTA · A MESMA CARREIRA</div><h1>Seu legado acompanha você.</h1><p>Escolha seu nome de piloto e entre direto no jogo. Sua carreira fica salva na nuvem vinculada à sua identidade.</p></section>${content}<p class="account-gate-footnote">${footnote}</p></div></main>`;
   };
 
   UI.prototype.authPanel = function () {
     const state = this.game.multiplayer.state;
-    const view = state.authView || "login";
+    // With Anonymous Sign-Ins turned off on the project there is no identity to
+    // claim, so the gate must land on the e-mail account panel.
+    const anonymousOff = !!state.anonymousUnavailable;
+    let view = state.authView || (anonymousOff ? "login" : "identity");
+    if (anonymousOff && view === "identity") view = "login";
     const busy = state.busy ? "disabled" : "";
     const alert = state.error
       ? `<div class="mp-alert" role="alert"><span>${icon("alert")}</span><p>${esc(state.error)}</p><button data-action="mp-close-error" aria-label="Fechar">${icon("close")}</button></div>`
@@ -69,7 +76,13 @@ export function extendMultiplayerUI(UI) {
     if (view === "reset-sent") {
       return `${alert}${info}<section class="panel mp-identity-card auth-card"><div class="eyebrow">E-MAIL ENVIADO</div><h2>Verifique sua caixa de entrada.</h2><p>Se <b>${esc(state.pendingEmail || "o e-mail informado")}</b> estiver cadastrado, você receberá um link para redefinir sua senha.</p><div class="auth-links"><button type="button" class="btn text-btn" data-action="auth-view" data-view="login">VOLTAR AO LOGIN</button></div></section>`;
     }
-    return `${alert}${info}<section class="panel mp-identity-card auth-card"><div class="eyebrow">ACESSO RESTRITO · CONTA</div><h2>Entre na sua conta.</h2><p>Use seu nome de usuário ou e-mail e sua senha.</p><form id="auth-login-form" data-auth-form="auth-login" class="mp-form" autocomplete="off" onsubmit="return false"><label>NOME DE USUÁRIO OU E-MAIL<input name="identifier" maxlength="254" required autocomplete="username"></label><label>SENHA<input name="password" type="password" maxlength="72" required autocomplete="current-password"></label><label class="auth-keep"><input type="checkbox" name="keep" checked><span>Manter conectado neste dispositivo</span></label><button type="button" class="btn primary full-width" data-action="auth-login" ${busy}>${state.busy ? "ENTRANDO…" : "ENTRAR"}</button></form><div class="auth-links"><button type="button" class="btn text-btn" data-action="auth-view" data-view="forgot">ESQUECI MINHA SENHA</button><span>·</span><button type="button" class="btn text-btn" data-action="auth-view" data-view="register">CRIAR CONTA</button><span>·</span><button type="button" class="btn text-btn" data-action="auth-view" data-view="identity">VOLTAR</button></div></section>`;
+    const identityLink = anonymousOff
+      ? ""
+      : `<span>·</span><button type="button" class="btn text-btn" data-action="auth-view" data-view="identity">VOLTAR</button>`;
+    const anonymousNote = anonymousOff
+      ? `<p class="subtle auth-warning">Identidade anônima indisponível neste projeto (Anonymous Sign-Ins desligado no Supabase). Crie uma conta de e-mail para entrar — a confirmação é automática e sua carreira fica salva na nuvem.</p>`
+      : "";
+    return `${alert}${info}<section class="panel mp-identity-card auth-card"><div class="eyebrow">ACESSO RESTRITO · CONTA</div><h2>Entre na sua conta.</h2><p>Use seu nome de usuário ou e-mail e sua senha.</p>${anonymousNote}<form id="auth-login-form" data-auth-form="auth-login" class="mp-form" autocomplete="off" onsubmit="return false"><label>NOME DE USUÁRIO OU E-MAIL<input name="identifier" maxlength="254" required autocomplete="username"></label><label>SENHA<input name="password" type="password" maxlength="72" required autocomplete="current-password"></label><label class="auth-keep"><input type="checkbox" name="keep" checked><span>Manter conectado neste dispositivo</span></label><button type="button" class="btn primary full-width" data-action="auth-login" ${busy}>${state.busy ? "ENTRANDO…" : "ENTRAR"}</button></form><div class="auth-links"><button type="button" class="btn text-btn" data-action="auth-view" data-view="forgot">ESQUECI MINHA SENHA</button><span>·</span><button type="button" class="btn text-btn" data-action="auth-view" data-view="register">CRIAR CONTA</button>${identityLink}</div></section>`;
   };
 
   UI.prototype.multiplayer = function () {

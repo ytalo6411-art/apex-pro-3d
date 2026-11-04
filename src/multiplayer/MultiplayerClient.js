@@ -57,6 +57,9 @@ export class MultiplayerClient {
       error: "",
       info: "",
       cloudSaveStatus: "checking",
+      // True when the project rejects anonymous sign-ins (dashboard toggle off).
+      // The gate then starts on the e-mail login instead of the identity card.
+      anonymousUnavailable: false,
       roomLoading: false,
       trackReady: false,
       onlineRace: false,
@@ -479,9 +482,28 @@ export class MultiplayerClient {
     if (!isValidSessionUser(user)) {
       // First visit (or cleared storage): create an anonymous player identity.
       // The session is persisted by Supabase, so the pilot never has to pick
-      // a name again on this device.
-      const anon = await this.client.auth.signInAnonymously();
-      if (anon.error) throw anon.error;
+      // a name again on this device. When the project has Anonymous Sign-Ins
+      // turned off this call is rejected — that is a configuration state, not a
+      // broken connection, so fall back to the e-mail account panel instead of
+      // dead-ending the player on a generic retry screen.
+      const anon = await this.client.auth.signInAnonymously().catch((thrown) => ({
+        data: null,
+        error: thrown instanceof Error ? thrown : new Error(String(thrown)),
+      }));
+      if (anon.error) {
+        if (!isAnonymousSignInDisabled(anon.error)) throw anon.error;
+        this.emit({
+          profile: null,
+          emailUnconfirmed: false,
+          anonymousUnavailable: true,
+          connection: "offline",
+          authView: "login",
+          error: "",
+          info:
+            "A identidade anônima está desativada neste projeto. Entre com uma conta de e-mail para jogar.",
+        });
+        return null;
+      }
       user = anon.data?.user;
       if (!isValidSessionUser(user)) {
         ({ data, error } = await this.client.auth.getSession());
@@ -521,6 +543,7 @@ export class MultiplayerClient {
     this.emit({
       profile: this.state.profile,
       emailUnconfirmed: false,
+      anonymousUnavailable: false,
       connection: "online",
       error: "",
       authView: needsName ? "identity" : this.state.authView,
@@ -1853,8 +1876,22 @@ function interpolateSnapshot(previous, current, alpha) {
   state.heading = previous.heading + delta * t;
   return state;
 }
+// Supabase rejects signInAnonymously() (HTTP 403, "Anonymous sign-ins are
+// disabled") when the project has the toggle off. Detect it across the shapes
+// auth-js returns so the gate can fall back to the e-mail account panel.
+function isAnonymousSignInDisabled(error) {
+  const text = String(error?.message ?? error ?? "");
+  return (
+    /anonymous[\s_-]*sign[\s_-]*ins?\s+(?:are|is)\s+(?:not\s+)?disabled/i.test(text) ||
+    /(?:disabled|not\s+enabled|admin\s+only)[\s\S]{0,40}anonymous/i.test(text) ||
+    /anonymous[\s\S]{0,40}(?:disabled|not\s+enabled|admin\s+only)/i.test(text)
+  );
+}
+
 function friendlyError(error) {
   const message = String(error?.message || error || "Falha de conexão.").slice(0, 220);
+  if (isAnonymousSignInDisabled(error))
+    return "A identidade anônima está desativada neste projeto Supabase. Entre com uma conta de e-mail, ou habilite Anonymous Sign-Ins em Authentication → Sign In / Providers.";
   if (/save_too_large|cloud_save_too_large/i.test(message))
     return "Este save excede o limite de 8 MiB da sincronização em nuvem. Reduza retratos personalizados e tente novamente.";
   if (/cloud_save_invalid|cloud_save_revision_invalid/i.test(message))
