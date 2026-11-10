@@ -523,10 +523,6 @@ export function handleExtraAction(g, action, data) {
       ui.toast(nextCamera(g.world));
       return true;
     case "pit":
-      if (g.race?.online && !g.race.network.authoritative) {
-        g.multiplayer.sendRaceCommand("pit");
-        return true;
-      }
       if (g.race?.manager) {
         const c = g.race.cars.find(
           (c) => c.id === (g.race.isDelegated() ? g.world.focusId || 0 : 0),
@@ -556,11 +552,6 @@ export function handleExtraAction(g, action, data) {
       g.engineer.report(g.race);
       return true;
     case "pit-options":
-      if (g.race?.online && !g.race.network.authoritative) {
-        if (g.race.state !== "paused") g.pause(true);
-        ui.showModal("online-pit");
-        return true;
-      }
       if (g.race?.isDelegated()) {
         g.action("manager-open");
         return true;
@@ -571,11 +562,6 @@ export function handleExtraAction(g, action, data) {
       }
       return true;
     case "pit-cancel":
-      if (g.race?.online && !g.race.network.authoritative) {
-        g.multiplayer.sendRaceCommand("pit");
-        g.ui.closeModal();
-        return true;
-      }
       if (g.race?.localCar?.pit.state === "track") {
         g.race.localCar.pit.requested = false;
         g.pause();

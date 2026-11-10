@@ -3,6 +3,7 @@ import "./style.css";
 import "./ui/extras.css";
 import "./ui/race.css";
 import "./ui/competitions.css";
+import "./ui/ranking.css";
 import { Game } from "./core/Game.js";
 
 // Keep the original synchronous Game creation; assets/shader readiness is async.

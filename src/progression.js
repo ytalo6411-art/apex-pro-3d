@@ -1,5 +1,6 @@
 import { rememberRivals } from "./ai/Rivalries.js";
 import { recordRound } from "./championship.js";
+import { recordRaceStats } from "./ranking.js";
 import { developAcademyDriver } from "./data/drivers.js";
 import {
   sponsorById,
@@ -101,11 +102,11 @@ export function rewardRace(save, race) {
       : 100;
   save.credits += credits;
   save.xp += player.finished ? 200 + (7 - player.position) * 50 : 30;
-  const ds = save.driverStats[race.cars[0].driverId] || { races: 0, wins: 0 };
-  ds.races++;
-  if (player.position === 1 && player.finished && race.mode !== "time-trial")
-    ds.wins++;
-  save.driverStats[race.cars[0].driverId] = ds;
+  // Ranking local: atualiza voltas, vitórias e dinheiro de TODOS os pilotos.
+  recordRaceStats(save, results, {
+    countWins: race.mode !== "time-trial",
+    timeTrial: race.mode === "time-trial",
+  });
   save.history.push({
     track: race.trackId,
     position: player.position,
