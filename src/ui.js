@@ -1,10 +1,9 @@
 import { managerPanel, managerHistory } from "./ui/ManagerUI.js";
 import { extendCompetitionUI } from "./ui/CompetitionUI.js";
-import { extendMultiplayerUI } from "./multiplayer/MultiplayerUI.js";
-import "./multiplayer/multiplayer.css";
 import { trackPreview } from "./data/TrackGeometry.js";
 import { renderRaceHUD, updateRaceHUD } from "./ui/RaceHUD.js";
 import { cameraModes } from "./camera/CameraManager.js";
+import { activeDriverForSave } from "./data/drivers.js";
 import { trackById, trackCatalog } from "./data/tracks.js";
 import { extendUI } from "./ui/Extras.js";
 import { activeTrack, mapPoint } from "./track.js";
@@ -18,6 +17,7 @@ import {
   upgradeCost,
 } from "./garage.js";
 import { goals } from "./progression.js";
+import { buildRankings } from "./ranking.js";
 import { rounds, standings } from "./championship.js";
 import { liveries } from "./models.js";
 import { difficulties } from "./ai.js";
@@ -34,7 +34,7 @@ export class UI {
   constructor(game) {
     this.game = game;
     this.root = document.querySelector("#ui");
-    this.page = game.authStatus === "ready" ? "home" : "account";
+    this.page = "home";
     this.modal = null;
     this.toastTimer = 0;
     this.lastHUD = 0;
@@ -43,14 +43,6 @@ export class UI {
       if (!b || b.disabled) return;
       if (b.dataset.nav) this.navigate(b.dataset.nav);
       else this.game.action(b.dataset.action, b.dataset);
-    });
-    // Auth forms: pressing Enter in any field must submit like the button.
-    this.root.addEventListener("submit", (e) => {
-      const form = e.target.closest?.("form[data-auth-form]");
-      if (!form) return;
-      e.preventDefault();
-      const action = form.dataset.authForm;
-      if (action) this.game.action(action, {});
     });
     this.root.addEventListener("change", (e) => {
       if (this.game.managerChange(e.target)) return;
@@ -93,11 +85,11 @@ export class UI {
     });
   }
   pilotBadge() {
-    const profile = this.game.multiplayer?.state.profile;
-    const name = String(profile?.display_name || profile?.username || "").replace(/[^\p{L}\p{N} _-]/gu, "").trim();
+    const driver = activeDriverForSave(this.game.save);
+    const name = String(driver?.name || "").replace(/[^\p{L}\p{N} _-]/gu, "").trim();
     if (!name) return `<div class="avatar" title="Apex Motorsport">AD</div>`;
     const initials = name.split(/[\s_]+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-    return `<div class="avatar pilot-avatar" title="${name.replaceAll('"', "&quot;")} — ${String(profile?.username || "").replaceAll('"', "&quot;")}">${initials || "P"}</div><span class="pilot-name">${name.replaceAll("<", "&lt;")}</span>`;
+    return `<div class="avatar pilot-avatar" title="${name.replaceAll('"', "&quot;")} — ${this.game.save.team?.name || "Apex Motorsport"}">${initials || "P"}</div><span class="pilot-name">${name.replaceAll("<", "&lt;")}</span>`;
   }
   header() {
     const s = this.game.save;
@@ -105,7 +97,7 @@ export class UI {
       ["home", "Início"],
       ["management", "Estratégia"],
       ["championship", "Campeonato"],
-      ["multiplayer", "Multiplayer"],
+      ["ranking", "Ranking"],
       ["garage", "Garagem"],
       ["upgrades", "Melhorias"],
       ["stats", "Estatísticas"],
@@ -125,7 +117,6 @@ export class UI {
     return `<div class="page-heading"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1>${sub ? `<p>${sub}</p>` : ""}</div><div class="session-tag"><span class="live-dot"></span> PRONTO PARA CORRER</div></div>`;
   }
   navigate(page) {
-    if (this.game.authStatus !== "ready") return;
     if (
       this.game.race &&
       ["countdown", "racing", "paused", "finishing"].includes(
@@ -144,20 +135,17 @@ export class UI {
     this.game.world.setPaint?.(this.game.save.selectedPaint);
     this.render();
     if (page === "tracks") this.game.world.setMode("track-preview");
-    if (page === "multiplayer") void this.game.multiplayer.openMenu();
   }
   render() {
     const world = this.game.world.container;
     document.querySelector("#app").appendChild(world);
     world.className = "";
     this.root.innerHTML =
-      this.page === "account"
-        ? this.accountGate()
-        : this.page === "race"
-          ? this.raceHUD()
-          : this.header() +
-            `<main class="main">${this[this.page]()}</main>` +
-            this.footer();
+      this.page === "race"
+        ? this.raceHUD()
+        : this.header() +
+          `<main class="main">${this[this.page]()}</main>` +
+          this.footer();
     const slot = this.root.querySelector(".scene-slot");
     if (slot) {
       slot.appendChild(world);
@@ -246,6 +234,36 @@ export class UI {
         "",
       )}</div><div class="section-label"><span>OBJETIVOS DE CARREIRA</span><i></i><span>${s.objectives.length} / 6 CONQUISTADOS</span></div><div class="goals-grid">${goals.map((g) => `<article class="panel goal-card ${s.objectives.includes(g.id) ? "complete" : ""}"><div class="goal-icon">${icon(s.objectives.includes(g.id) ? "check" : g.icon)}</div><div><h3>${g.name}</h3><p>${g.description}</p><span>${s.objectives.includes(g.id) ? "CONCLUÍDO" : "RECOMPENSA"} <b>+${g.reward} CR</b></span></div></article>`).join("")}</div><div class="career-strip panel"><div><small>VOLTAS COMPLETADAS</small><b>${s.stats.laps}</b></div><div><small>DISTÂNCIA PERCORRIDA</small><b>${(s.stats.distance / 1000).toFixed(1)} <span>km</span></b></div><div><small>TEMPORADAS CONCLUÍDAS</small><b>${s.stats.seasons}</b></div><div><small>CARROS DESBLOQUEADOS</small><b>${s.unlockedCars.length}<span> / ${vehicles.length}</span></b></div></div>`;
   }
+  ranking() {
+    const tab = this.rankingTab || "laps";
+    const { byBestLap, byWins, byEarnings } = buildRankings(this.game.save);
+    const tabs = [
+      ["laps", "VOLTAS MAIS RÁPIDAS", "timer"],
+      ["wins", "MAIS VITÓRIAS", "trophy"],
+      ["money", "MAIS DINHEIRO", "credit"],
+    ];
+    const rows =
+      tab === "wins"
+        ? byWins
+        : tab === "money"
+          ? byEarnings
+          : byBestLap;
+    const valueOf = (r) =>
+      tab === "wins"
+        ? `${r.wins} <small>vitórias</small>`
+        : tab === "money"
+          ? `${fmt(r.earnings)} <small>CR</small>`
+          : time(r.bestLap);
+    const shown = rows.slice(0, 10);
+    const playerRow = rows.find((r) => r.isPlayer);
+    const playerIndex = playerRow ? rows.indexOf(playerRow) : -1;
+    const medal = (i) => (i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : "");
+    const rowHtml = (r, i) => `<tr class="${r.isPlayer ? "player-row" : ""}"><td class="rank-pos ${medal(i)}">${String(i + 1).padStart(2, "0")}</td><td><span class="driver-stripe" style="background:${r.color || "#e63956"}"></span><b>${r.name}</b><small>#${String(r.number ?? 0).padStart(2, "0")}${r.isPlayer ? " · VOCÊ" : ""}</small></td><td class="rank-value">${valueOf(r)}</td><td class="rank-races">${r.races} corridas</td></tr>`;
+    return `${this.title("RANKING / OS MELHORES DO APEX", "Quem manda no grid.", "Voltas mais rápidas, mais vitórias e mais dinheiro — atualizado a cada corrida.")}
+ <div class="ranking-tabs" role="tablist">${tabs.map(([key, label, ic]) => `<button role="tab" aria-selected="${tab === key}" class="ranking-tab ${tab === key ? "active" : ""}" data-action="ranking-tab" data-tab="${key}">${icon(ic)} ${label}</button>`).join("")}</div>
+ <section class="panel table-panel ranking-panel"><table><thead><tr><th>POS</th><th>PILOTO</th><th>${tab === "laps" ? "MELHOR VOLTA" : tab === "wins" ? "VITÓRIAS" : "DINHEIRO GANHO"}</th><th>CORRIDAS</th></tr></thead><tbody>${shown.map(rowHtml).join("")}</tbody></table>${playerIndex >= 10 && playerRow ? `<div class="ranking-you">Sua posição: <b>${playerIndex + 1}º</b> · ${valueOf(playerRow)}</div>` : ""}</section>
+ <p class="ranking-note">${icon("help")} Os pilotos de IA acumulam resultados reais nas suas corridas. Vença, vire voltas rápidas e encha o cofre para subir no ranking.</p>`;
+  }
   raceHUD() {
     return renderRaceHUD(this);
   }
@@ -307,17 +325,6 @@ export class UI {
     document.getElementById("modal")?.remove();
     let html = "",
       s = this.game.save;
-    const cloudStatus = this.game.multiplayer?.state.cloudSaveStatus || "checking";
-    const cloudStatusMessage = {
-      checking: "Verificando",
-      idle: "Aguardando conta",
-      pending: "Sincronizando alterações…",
-      synced: "Sincronizado",
-      error: "Falha na sincronização",
-    }[cloudStatus] || "Sincronizando";
-    const cloudRetry = cloudStatus === "error"
-      ? btn("TENTAR NOVAMENTE", "save-sync-retry", "secondary")
-      : "";
     if (type === "setup" || type === "champ-setup") {
       const champ = type === "champ-setup",
         round = rounds[s.championship.results.length];
@@ -333,13 +340,8 @@ export class UI {
         )}</div><div class="setup-controls"><span>IA autônoma por padrão</span><span>WASD somente no modo manual</span><span><kbd>R</kbd> recuperar</span><span><kbd>ESC</kbd> pausar</span></div>${btn(`INICIAR CORRIDA ${icon("arrow")}`, champ ? "start-champ" : "start", "primary full-width")}<small class="modal-footnote">${icon("check")} Progresso salvo automaticamente após a corrida.</small>`;
     } else if (type === "pause") {
       html = `<div class="modal-eyebrow">${icon("pause")} BOX, BOX.</div><h2>Uma pausa. Não o fim.</h2><p>Seu lugar no grid está esperando.</p><div class="pause-actions">${btn(`VOLTAR À PISTA ${icon("play")}`, "resume", "primary full-width")}${btn(`REINICIAR CORRIDA ${icon("reset")}`, "restart", "secondary full-width")}${btn("SAIR PARA A CENTRAL", "exit-race", "text-btn full-width")}</div><div class="info-note">Reiniciar ou sair não concede créditos. A etapa atual não será registrada.</div>`;
-    } else if (type === "online-pause") {
-      html = `<div class="modal-eyebrow">${icon("wifi")} CORRIDA ONLINE · PAUSA LOCAL</div><h2>Você ainda está na corrida.</h2><p>A sessão online continua para todos. O anfitrião mantém a simulação autoritativa; sair encerrará sua participação.</p><div class="pause-actions">${btn(`VOLTAR À PISTA ${icon("play")}`, "resume", "primary full-width")}${btn("SAIR DA SALA", "mp-leave", "text-btn full-width")}</div>`;
-    } else if (type === "online-pit") {
-      const car = this.game.race?.localCar;
-      html = `<div class="modal-eyebrow">${icon("flag")} CORRIDA ONLINE · BOXES</div><h2>Parada do piloto.</h2><p>${car?.pit?.requested ? "Uma chamada de boxes está ativa." : "Solicite ou cancele a chamada de boxes. A equipe anfitriã aplica o comando à sua posição autoritativa."}</p><div class="pause-actions">${btn(car?.pit?.requested ? "CANCELAR CHAMADA" : "SOLICITAR BOXES", car?.pit?.requested ? "pit-cancel" : "pit", "primary full-width")}${btn("VOLTAR À PISTA", "resume", "secondary full-width")}</div><div class="info-note">Latência de rede pode atrasar a confirmação visual.</div>`;
     } else if (type === "settings") {
-      html = `<div class="modal-eyebrow">${icon("settings")} CONFIGURAÇÕES</div><h2>No seu ritmo.</h2><p>Ajustes e carreira vinculados à sua conta.</p><div class="setting-row"><div><b>Áudio do motor e efeitos</b><small>Som sintetizado localmente. Sem trilha remota.</small></div><label class="switch"><input type="checkbox" data-setting="audio" ${s.settings.audio ? "checked" : ""}><span></span></label></div><div class="setting-row"><div><b>Volume</b><small>O som começa ao entrar na corrida.</small></div><input type="range" min="0" max="1" step=".05" value="${s.settings.volume}" data-setting="volume" aria-label="Volume"></div><div class="setting-row"><div><b>Qualidade gráfica</b><small>Aplicado ao vivo. Física e regras permanecem iguais.</small></div><select data-setting="quality" aria-label="Qualidade gráfica">${[
+      html = `<div class="modal-eyebrow">${icon("settings")} CONFIGURAÇÕES</div><h2>No seu ritmo.</h2><p>Ajustes salvos neste navegador.</p><div class="setting-row"><div><b>Áudio do motor e efeitos</b><small>Som sintetizado localmente. Sem trilha remota.</small></div><label class="switch"><input type="checkbox" data-setting="audio" ${s.settings.audio ? "checked" : ""}><span></span></label></div><div class="setting-row"><div><b>Volume</b><small>O som começa ao entrar na corrida.</small></div><input type="range" min="0" max="1" step=".05" value="${s.settings.volume}" data-setting="volume" aria-label="Volume"></div><div class="setting-row"><div><b>Qualidade gráfica</b><small>Aplicado ao vivo. Física e regras permanecem iguais.</small></div><select data-setting="quality" aria-label="Qualidade gráfica">${[
         ["low", "Low · Leve"],
         ["medium", "Medium · Média"],
         ["high", "High · Alta"],
@@ -360,7 +362,7 @@ export class UI {
         )
         .join(
           "",
-        )}</select></div><div class="cloud-save-note cloud-save-${cloudStatus}"><span class="live-dot"></span><div><b>Carreira na nuvem · ${cloudStatusMessage}</b><small>Seu progresso acompanha sua conta nos dispositivos.</small></div>${cloudRetry}</div><div class="setting-actions">${btn(`${icon("help")} CONTROLES`, "help")}</div>`;
+        )}</select></div><div class="setting-actions">${btn(`${icon("help")} CONTROLES`, "help")}</div>`;
     } else if (type === "help") {
       html = `<div class="modal-eyebrow">${icon("help")} GUIA DO PILOTO</div><h2>Sinta o asfalto.</h2><p>Física arcade. Resposta rápida. O resto é com você.</p><div class="help-grid">${[
         ["W / ↑", "Acelerar"],
@@ -408,4 +410,3 @@ export class UI {
 
 extendUI(UI);
 extendCompetitionUI(UI);
-extendMultiplayerUI(UI);

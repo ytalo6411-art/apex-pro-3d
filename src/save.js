@@ -18,9 +18,11 @@ import {
 } from "./data/parts.js";
 import { sponsorCatalog, teamPrincipals } from "./data/sponsors.js";
 import { MIN_RACE_LAPS } from "./racing/RaceConfig.js";
+import { ensureRankingStats } from "./ranking.js";
 
 export const SAVE_KEY = "apex-dynasty-v1";
-export const defaults = () => ({
+export const defaults = () =>
+  ensureRankingStats({
   version: 1,
   competitions: competitionsDefaults(),
   career: careerDefaults(),
@@ -126,7 +128,7 @@ export const defaults = () => ({
     effectsVolume: 0.6,
   },
   championship: { results: [], season: 1 },
-});
+  });
 
 const num = (v, min, max, fallback) =>
   typeof v === "number" && Number.isFinite(v)
@@ -443,6 +445,8 @@ export function validateSave(value) {
       s.driverStats[id] = {
         races: int(v.races, 0, 1e7, 0),
         wins: int(v.wins, 0, 1e7, 0),
+        bestLap: num(v.bestLap, 5, 5000, null),
+        earnings: int(v.earnings, 0, 1e9, 0),
       };
     const r = value.rivalries?.[id];
     if (r)
@@ -544,6 +548,7 @@ export function validateSave(value) {
   )
     ? settings.ruleSet
     : "auto";
+  ensureRankingStats(s);
   return s;
 }
 
